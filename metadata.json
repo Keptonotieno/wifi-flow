@@ -1,0 +1,8 @@
+{
+  "name": "WifiFlow",
+  "description": "Modern WiFi Billing and Hotspot Management SaaS platform for ISPs and hotspot operators in Kenya and Africa, featuring Mikrotik integration, M-Pesa automated billing, voucher generation, reseller management, and captive portals.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
