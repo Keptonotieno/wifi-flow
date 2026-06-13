@@ -127,6 +127,12 @@ export default function AuthScreen({ tenants, onLoginSuccess }: AuthScreenProps)
         return;
       }
 
+      const norm = email.toLowerCase().trim();
+      if ((role === 'Tenant Owner' || role === 'Super Admin') && norm !== 'keptonotieno@gmail.com' && norm !== 'keptonotieno@mail.com') {
+        setError('Access Denied: Only keptonotieno@gmail.com is authorized to register with Tenant Owner / Super Admin administrative privileges.');
+        return;
+      }
+
       if (password.length < 6) {
         setError('Password security warning: Password must be at least 6 characters for cloud RADIUS compatibility.');
         return;
@@ -170,6 +176,14 @@ export default function AuthScreen({ tenants, onLoginSuccess }: AuthScreenProps)
             tenantId: metadata.tenant_id || 'tenant-nairobi',
             phone: metadata.phone_number || metadata.phone || '+254700000000'
           };
+
+          // STRICT ADMIN ROLE RESTRICTION: Reject any unauthorized admin logins
+          const lowerEmail = loggedInUser.email.toLowerCase().trim();
+          if ((loggedInUser.role === 'Tenant Owner' || loggedInUser.role === 'Super Admin') && 
+              lowerEmail !== 'keptonotieno@gmail.com' && lowerEmail !== 'keptonotieno@mail.com') {
+            setError('Access Denied: Only keptonotieno@gmail.com is authorized to access Tenant Owner/Super Admin administrative roles.');
+            return;
+          }
           
           setSuccessMsg(`Welcome back, ${loggedInUser.fullName}! (Verified via Supabase Auth)`);
           
@@ -191,6 +205,13 @@ export default function AuthScreen({ tenants, onLoginSuccess }: AuthScreenProps)
           );
 
           if (matchedUser) {
+            // STRICT ADMIN ROLE RESTRICTION: Reject any unauthorized admin logins
+            const lowerEmail = matchedUser.email.toLowerCase().trim();
+            if ((matchedUser.role === 'Tenant Owner' || matchedUser.role === 'Super Admin') && 
+                lowerEmail !== 'keptonotieno@gmail.com' && lowerEmail !== 'keptonotieno@mail.com') {
+              setError('Access Denied: Only keptonotieno@gmail.com is authorized to access Tenant Owner/Super Admin administrative roles.');
+              return;
+            }
             setSuccessMsg(`Welcome back, ${matchedUser.fullName}! (Sandbox Session)`);
             setTimeout(() => {
               onLoginSuccess(matchedUser);
@@ -205,6 +226,13 @@ export default function AuthScreen({ tenants, onLoginSuccess }: AuthScreenProps)
           u => u.email.toLowerCase() === email.toLowerCase() && u.password === password
         );
         if (matchedUser) {
+          // STRICT ADMIN ROLE RESTRICTION: Reject any unauthorized admin logins
+          const lowerEmail = matchedUser.email.toLowerCase().trim();
+          if ((matchedUser.role === 'Tenant Owner' || matchedUser.role === 'Super Admin') && 
+              lowerEmail !== 'keptonotieno@gmail.com' && lowerEmail !== 'keptonotieno@mail.com') {
+            setError('Access Denied: Only keptonotieno@gmail.com is authorized to access Tenant Owner/Super Admin administrative roles.');
+            return;
+          }
           setSuccessMsg(`Welcome back, ${matchedUser.fullName}! (Sandbox Session)`);
           setTimeout(() => {
             onLoginSuccess(matchedUser);
@@ -245,6 +273,16 @@ export default function AuthScreen({ tenants, onLoginSuccess }: AuthScreenProps)
       setError('Email collision: This email was recently registered inside the directory. Please sign in instead.');
       setIsVerifyingEmail(false);
       return;
+    }
+
+    // STRICT OTP REGISTRATION CHECK: Ensure no user can hijack admin role on verification
+    if (role === 'Tenant Owner' || role === 'Super Admin') {
+      const norm = email.toLowerCase().trim();
+      if (norm !== 'keptonotieno@gmail.com' && norm !== 'keptonotieno@mail.com') {
+        setError('Access Denied: Only keptonotieno@gmail.com is authorized to register as administrative Tenant Owner / Super Admin.');
+        setIsVerifyingEmail(false);
+        return;
+      }
     }
 
     const newUser = {

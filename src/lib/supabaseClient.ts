@@ -8,19 +8,22 @@ import {
 const DEFAULT_URL = 'https://gsgsxnivjbdxdcuetuoy.supabase.co';
 const DEFAULT_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdzZ3N4bml2amJkeGRjdWV0dW95Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExNzAyODEsImV4cCI6MjA5Njc0NjI4MX0.lmSP7kh0ufkSI9OytT49yWqWaB7B4rRI5h_ncyYQe98';
 
-// Preset credentials in localStorage for consistent UI setup if they are empty
-if (!localStorage.getItem('wf_supabase_url')) {
-  localStorage.setItem('wf_supabase_url', DEFAULT_URL);
-}
-if (!localStorage.getItem('wf_supabase_anon_key')) {
-  localStorage.setItem('wf_supabase_anon_key', DEFAULT_ANON_KEY);
-}
+// Preset credentials in localStorage for consistent UI setup
+localStorage.setItem('wf_supabase_url', 'https://gsgsxnivjbdxdcuetuoy.supabase.co');
+localStorage.setItem('wf_supabase_anon_key', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdzZ3N4bml2amJkeGRjdWV0dW95Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExNzAyODEsImV4cCI6MjA5Njc0NjI4MX0.lmSP7kh0ufkSI9OytT49yWqWaB7B4rRI5h_ncyYQe98');
+localStorage.setItem('wf_payment_publishable_api_key', 'sb_publishable_Whw1hxd5ygvW_6qsHxcQ6Q_tnuadhcZ');
 
 let rawUrl = (import.meta as any).env?.VITE_SUPABASE_URL || localStorage.getItem('wf_supabase_url') || DEFAULT_URL;
 let rawKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || localStorage.getItem('wf_supabase_anon_key') || DEFAULT_ANON_KEY;
 
-// Sanitize: trim whitespace and remove any trailing slash to prevent double-slash (//rest/v1) routing errors
+// Sanitize: trim whitespace and remove trailing slashes or /rest/v1 routes to prevent standard routing issues
 rawUrl = (rawUrl || '').trim();
+if (rawUrl.endsWith('/')) {
+  rawUrl = rawUrl.slice(0, -1);
+}
+if (rawUrl.endsWith('/rest/v1')) {
+  rawUrl = rawUrl.slice(0, -8);
+}
 if (rawUrl.endsWith('/')) {
   rawUrl = rawUrl.slice(0, -1);
 }
@@ -262,9 +265,22 @@ export async function upsertRecord<T>(
 ): Promise<boolean> {
   try {
     const dbRecord = mapperToDb(record);
-    const { error } = await supabase.from(tableName).upsert(dbRecord);
+    let { error } = await supabase.from(tableName).upsert(dbRecord);
+    
+    // Schema Cache self-healing: Retry if 'expiry_date' column is missing in remote vouchers table
+    if (error && error.message && error.message.includes("expiry_date") && tableName === 'vouchers') {
+      console.warn(`[Supabase Schema Compatibility]: 'expiry_date' column not found in database. Retrying vouchers upsert without it...`);
+      const { expiry_date, ...restOfRecord } = dbRecord;
+      const retryResult = await supabase.from(tableName).upsert(restOfRecord);
+      error = retryResult.error;
+    }
+
     if (error) {
-      console.error(`Supabase upsert error on "${tableName}":`, error.message);
+      if (error.message && error.message.includes('Invalid path specified in request URL')) {
+        console.warn(`[Supabase Schema Notice]: Table "${tableName}" does not exist in your active Supabase database schema yet. To resolve this, navigate to the "Integration Setup" tab in the App Sidebar, copy the SQL Database Initializer script, and execute it inside your Supabase SQL Editor. Under the hood, we are gracefully utilizing the secure offline sandbox with standard mock data records.`);
+      } else {
+        console.error(`Supabase upsert error on "${tableName}":`, error.message);
+      }
       return false;
     }
     return true;
@@ -281,7 +297,11 @@ export async function deleteRecord(
   try {
     const { error } = await supabase.from(tableName).delete().eq('id', id);
     if (error) {
-      console.error(`Supabase delete error on "${tableName}":`, error.message);
+      if (error.message && error.message.includes('Invalid path specified in request URL')) {
+        console.warn(`[Supabase Schema Notice]: Table "${tableName}" does not exist in your active Supabase database schema yet. To resolve this, navigate to the "Integration Setup" tab in the App Sidebar, copy the SQL Database Initializer script, and execute it inside your Supabase SQL Editor. Under the hood, we are gracefully utilizing the secure offline sandbox with standard mock data records.`);
+      } else {
+        console.error(`Supabase delete error on "${tableName}":`, error.message);
+      }
       return false;
     }
     return true;

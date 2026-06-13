@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Network, Radio, Activity, CheckCircle, RefreshCw, XCircle, 
-  Trash2, ShieldAlert, Cpu, HardDrive, UserMinus, Plus, Info, Wifi, ArrowUp, ArrowDown
+  Trash2, ShieldAlert, Cpu, HardDrive, UserMinus, Plus, Info, Wifi, ArrowUp, ArrowDown,
+  Terminal, MessageSquare, Send
 } from 'lucide-react';
 import { Router, ActiveSession, Tenant } from '../types';
 import { 
@@ -114,6 +115,184 @@ export default function MikrotikRadius({
     ipAddress: '',
     model: 'MikroTik CCR2004-16G-2S+',
   });
+
+  // --- NATIVE ROUTEROS & AFRICA'S TALKING LIVE INTEGRATION STATES ---
+  const [activeBoardTab, setActiveBoardTab] = useState<'routeros_terminal' | 'sms_gateway'>('routeros_terminal');
+  
+  // RouterOS credentials and handshake status
+  const [rotCredentials, setRotCredentials] = useState({
+    host: '192.168.88.1',
+    port: '8728',
+    user: 'admin',
+    password: ''
+  });
+  const [rotStatus, setRotStatus] = useState<'idle' | 'testing' | 'online' | 'offline'>('idle');
+  const [rotDetails, setRotDetails] = useState<any>(null);
+  const [rawTrace, setRawTrace] = useState<string[]>([]);
+  const [manualCmd, setManualCmd] = useState('/system/resource/print');
+  const [cmdResult, setCmdResult] = useState<string>('');
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [dbRotLogs, setDbRotLogs] = useState<any[]>([]);
+
+  // Africa's Talking Gateway configuration inputs and messages
+  const [smsConfigForm, setSmsConfigForm] = useState({
+    username: 'sandbox',
+    apiKey: '',
+    senderId: ''
+  });
+  const [smsForm, setSmsForm] = useState({
+    to: '254712345678',
+    message: 'Hello, your WifiFlow hotspot voucher code is active!'
+  });
+  const [isSendingSms, setIsSendingSms] = useState(false);
+  const [smsResult, setSmsResult] = useState<any>(null);
+  const [smsLogs, setSmsLogs] = useState<any[]>([]);
+
+  const fetchRouterLogs = async () => {
+    try {
+      const res = await fetch('/api/mikrotik/logs');
+      if (res.ok) {
+        const data = await res.json();
+        setDbRotLogs(data);
+      }
+    } catch (e) {
+      console.warn("Failed fetching router logs", e);
+    }
+  };
+
+  const fetchSmsLogs = async () => {
+    try {
+      const res = await fetch('/api/sms/logs');
+      if (res.ok) {
+        const data = await res.json();
+        setSmsLogs(data);
+      }
+    } catch (e) {
+      console.warn("Failed fetching sms logs", e);
+    }
+  };
+
+  useEffect(() => {
+    fetchRouterLogs();
+    fetchSmsLogs();
+    const interval = setInterval(() => {
+      fetchRouterLogs();
+      fetchSmsLogs();
+    }, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleTestRouterConnection = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRotStatus('testing');
+    setRotDetails(null);
+    try {
+      const res = await fetch('/api/mikrotik/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rotCredentials)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setRotStatus('online');
+        setRotDetails(data);
+        if (data.trace) setRawTrace(data.trace);
+      } else {
+        setRotStatus('offline');
+        setRotDetails(data);
+        if (data.trace) setRawTrace(data.trace);
+      }
+      fetchRouterLogs();
+    } catch (err: any) {
+      setRotStatus('offline');
+      setRotDetails({ message: err.message || err });
+    }
+  };
+
+  const handleExecuteManualCommand = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualCmd.trim()) return;
+    setIsExecuting(true);
+    setCmdResult('');
+    try {
+      const words = manualCmd.trim().split(' ').filter(Boolean);
+      const res = await fetch('/api/mikrotik/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...rotCredentials,
+          words
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCmdResult(JSON.stringify(data.response, null, 2));
+        if (data.trace) setRawTrace(data.trace);
+      } else {
+        setCmdResult(`Execution Error: ${data.error || JSON.stringify(data)}`);
+        if (data.trace) setRawTrace(data.trace);
+      }
+      fetchRouterLogs();
+    } catch (err: any) {
+      setCmdResult(`Connection Error: ${err.message || err}`);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  const executeCommandDirectly = async (cmdText: string) => {
+    setManualCmd(cmdText);
+    setIsExecuting(true);
+    setCmdResult('');
+    try {
+      const words = cmdText.trim().split(' ').filter(Boolean);
+      const res = await fetch('/api/mikrotik/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...rotCredentials,
+          words
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCmdResult(JSON.stringify(data.response, null, 2));
+        if (data.trace) setRawTrace(data.trace);
+      } else {
+        setCmdResult(`Execution Error: ${data.error || JSON.stringify(data)}`);
+        if (data.trace) setRawTrace(data.trace);
+      }
+      fetchRouterLogs();
+    } catch (err: any) {
+      setCmdResult(`Connection Error: ${err.message || err}`);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  const handleSendManualSms = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSendingSms(true);
+    setSmsResult(null);
+    try {
+      const res = await fetch('/api/sms/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: smsForm.to,
+          message: smsForm.message,
+          ...smsConfigForm
+        })
+      });
+      const data = await res.json();
+      setSmsResult(data);
+      fetchSmsLogs();
+    } catch (err: any) {
+      setSmsResult({ success: false, error: err.message || err });
+    } finally {
+      setIsSendingSms(false);
+    }
+  };
 
   const handleCreateRouter = (e: React.FormEvent) => {
     e.preventDefault();
@@ -531,6 +710,474 @@ export default function MikrotikRadius({
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+
+      {/* ======================================================= */}
+      {/* NATIVE INTERACTIVE DIAGNOSTIC & DISPATCH CONTROL BOARD   */}
+      {/* ======================================================= */}
+      <div className={`border rounded-xl p-5 shadow-sm space-y-6 transition-all ${
+        isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100 text-slate-800'
+      }`}>
+        <div className="flex flex-col md:flex-row md:items-center justify-between border-b pb-4 gap-4 border-slate-100 dark:border-slate-800/60">
+          <div className="space-y-1">
+            <h3 className="font-bold flex items-center gap-2 text-md">
+              <Terminal className="w-5 h-5 text-indigo-500" />
+              Advanced Field Link & Messaging Diagnostic Board
+            </h3>
+            <p className="text-xs text-slate-400">
+              Direct interfaces for verification of physical TCP RouterOS API sockets and Safaricom / Africa's Talking delivery loops.
+            </p>
+          </div>
+          
+          <div className="flex gap-1.5 p-1 rounded-lg bg-slate-100 dark:bg-slate-950 text-xs border border-slate-200/50 dark:border-slate-805">
+            <button
+              onClick={() => setActiveBoardTab('routeros_terminal')}
+              className={`px-3 py-1.5 rounded-md font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeBoardTab === 'routeros_terminal' 
+                  ? 'bg-indigo-600 text-white shadow-sm' 
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              RouterOS API Client
+            </button>
+            <button
+              onClick={() => setActiveBoardTab('sms_gateway')}
+              className={`px-3 py-1.5 rounded-md font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeBoardTab === 'sms_gateway' 
+                  ? 'bg-indigo-600 text-white shadow-sm' 
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              Africa's Talking SMS
+            </button>
+          </div>
+        </div>
+
+        {/* TAB 1: MIKROTIK ROUTEROS NATIVE API DRIVER CLIENT */}
+        {activeBoardTab === 'routeros_terminal' && (
+          <div className="space-y-6">
+            <form onSubmit={handleTestRouterConnection} className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-slate-950/20 dark:bg-slate-950/40 p-4 rounded-xl border border-slate-200/50 dark:border-slate-800/50 text-xs">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-mono uppercase font-bold text-slate-400">Host IP/DNS</label>
+                <input
+                  type="text"
+                  value={rotCredentials.host}
+                  onChange={e => setRotCredentials({...rotCredentials, host: e.target.value})}
+                  className="w-full bg-slate-950 dark:bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 font-mono text-slate-200"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-mono uppercase font-bold text-slate-400">API Port</label>
+                <input
+                  type="text"
+                  value={rotCredentials.port}
+                  onChange={e => setRotCredentials({...rotCredentials, port: e.target.value})}
+                  className="w-full bg-slate-950 dark:bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 font-mono text-slate-200"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-mono uppercase font-bold text-slate-400">Username</label>
+                <input
+                  type="text"
+                  value={rotCredentials.user}
+                  onChange={e => setRotCredentials({...rotCredentials, user: e.target.value})}
+                  className="w-full bg-slate-950 dark:bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 font-mono text-slate-200"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-mono uppercase font-bold text-slate-400">Password</label>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="None"
+                    value={rotCredentials.password}
+                    onChange={e => setRotCredentials({...rotCredentials, password: e.target.value})}
+                    className="w-full bg-slate-950 dark:bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 font-mono text-slate-200"
+                  />
+                  <button
+                    type="submit"
+                    disabled={rotStatus === 'testing'}
+                    className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-55 py-1.5 px-3 rounded font-semibold text-white transition-all whitespace-nowrap cursor-pointer flex items-center gap-1"
+                  >
+                    {rotStatus === 'testing' ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Wifi className="w-3.5 h-3.5" />}
+                    Verify API
+                  </button>
+                </div>
+              </div>
+            </form>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Dynamic Status panel */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs uppercase tracking-wider font-mono font-bold text-slate-400 flex items-center gap-1.5">
+                    Connection State
+                  </h4>
+                  {rotStatus === 'online' && (
+                    <span className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                      ● Port 8728 Open
+                    </span>
+                  )}
+                  {rotStatus === 'offline' && (
+                    <span className="bg-rose-500/15 border border-rose-500/30 text-rose-400 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                      ● Link Offline
+                    </span>
+                  )}
+                  {rotStatus === 'testing' && (
+                    <span className="bg-amber-500/15 border border-amber-500/30 text-amber-500 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider animate-pulse">
+                      Handshake Auth...
+                    </span>
+                  )}
+                  {rotStatus === 'idle' && (
+                    <span className="bg-slate-500/15 border border-slate-500/30 text-slate-400 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                      Not Checked
+                    </span>
+                  )}
+                </div>
+
+                {rotDetails && (
+                  <div className="p-3.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-950/10 dark:bg-slate-900/15 space-y-3 text-xs">
+                    <p className="font-medium text-slate-300">{rotDetails.message}</p>
+                    
+                    {rotDetails.version && (
+                      <div className="grid grid-cols-3 gap-2 font-mono text-[10px]">
+                        <div className="p-2 border rounded border-slate-200/30 bg-slate-105/5">
+                          <span className="text-slate-400 block mb-0.5">Uptime</span>
+                          <strong className="text-indigo-400">{rotDetails.uptime}</strong>
+                        </div>
+                        <div className="p-2 border rounded border-slate-200/30 bg-slate-105/5">
+                          <span className="text-slate-400 block mb-0.5">RouterOS</span>
+                          <strong className="text-emerald-400">v{rotDetails.version}</strong>
+                        </div>
+                        <div className="p-2 border rounded border-slate-200/30 bg-slate-105/5">
+                          <span className="text-slate-400 block mb-0.5">CPU Load</span>
+                          <strong className="text-sky-400">{rotDetails.cpuUsage}</strong>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Field controller log timeline */}
+                <div className="space-y-2">
+                  <span className="text-[10px] font-mono uppercase font-bold text-slate-400 block">RouterOS Diagnostic History</span>
+                  <div className="max-h-40 overflow-y-auto space-y-1.5 text-[11px] font-mono">
+                    {dbRotLogs.map(log => {
+                      let tagColor = 'text-indigo-400';
+                      if(log.type === 'error') tagColor = 'text-rose-400';
+                      if(log.type === 'success') tagColor = 'text-emerald-400';
+
+                      return (
+                        <div key={log.id} className="p-2 border dark:border-slate-800/40 bg-slate-950/20 dark:bg-slate-950/50 rounded flex gap-2 justify-between items-start">
+                          <div className="space-y-0.5">
+                            <span className={`font-bold ${tagColor}`}>[{log.type.toUpperCase()}]</span>
+                            <p className="text-slate-300 leading-tight">{log.message}</p>
+                          </div>
+                          <span className="text-[9px] text-slate-500 whitespace-nowrap">
+                            {new Date(log.timestamp).toLocaleTimeString()}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Console command execution */}
+              <div className="md:col-span-2 space-y-4">
+                <form onSubmit={handleExecuteManualCommand} className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-mono font-bold uppercase text-slate-400 flex items-center gap-1">
+                      RouterOS Manual Console Sentence
+                    </label>
+                    <span className="text-[10px] text-slate-500 font-sans">Whitespace character separates words</span>
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={manualCmd}
+                      onChange={e => setManualCmd(e.target.value)}
+                      placeholder="e.g. /queue/simple/print"
+                      className="w-full bg-slate-950 dark:bg-slate-900 border border-slate-800 rounded px-3 py-2 font-mono text-xs text-emerald-400 focus:outline-none focus:border-indigo-500"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isExecuting}
+                      className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-55 px-4.5 py-2 font-semibold rounded text-white flex items-center gap-1.5 text-xs transition-colors cursor-pointer"
+                    >
+                      {isExecuting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                      Execute
+                    </button>
+                  </div>
+
+                  {/* Diagnostic Presets Container */}
+                  <div className="space-y-1.5">
+                    <span className="text-[9px] uppercase font-mono font-bold text-slate-500 block">Quick Sentinel Presets:</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { label: 'Resource Info', cmd: '/system/resource/print' },
+                        { label: 'Active Hotspots', cmd: '/ip/hotspot/active/print' },
+                        { label: 'Simple Queues', cmd: '/queue/simple/print' },
+                        { label: 'DHCP Leases', cmd: '/ip/dhcp-server/lease/print' },
+                        { label: 'Interfaces', cmd: '/interface/print' },
+                      ].map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => executeCommandDirectly(preset.cmd)}
+                          className="bg-slate-950 hover:bg-slate-900 text-[10px] font-mono border border-slate-800 text-slate-300 hover:text-indigo-400 px-2.5 py-1 rounded transition-colors cursor-pointer"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </form>
+
+                {/* Packet Trace log Panel */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <span className="text-[10px] uppercase font-mono font-bold text-slate-400 block">Packet Byte Handshake Trace</span>
+                    <div className="h-44 overflow-y-auto bg-slate-950 border border-slate-800/80 rounded-xl p-3 font-mono text-[10px] text-sky-400/90 leading-tight space-y-1">
+                      {rawTrace.length === 0 ? (
+                        <p className="text-slate-600 italic py-10 text-center">No active API trace recorded. Run Verify API or Execute sentence.</p>
+                      ) : (
+                        rawTrace.map((tr, idx) => {
+                          let color = 'text-sky-400';
+                          if (tr.includes('[TX]')) color = 'text-amber-400';
+                          if (tr.includes('[SYS]')) color = 'text-indigo-400';
+                          return <div key={idx} className={`${color} break-all`}>{tr}</div>;
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <span className="text-[10px] uppercase font-mono font-bold text-slate-400 block">Console JSON Response</span>
+                    <div className="h-44 overflow-y-auto bg-slate-950 border border-slate-800/80 rounded-xl p-3 font-mono text-[10px] text-emerald-400 leading-tight">
+                      {cmdResult ? (
+                        <pre className="break-all whitespace-pre-wrap">{cmdResult}</pre>
+                      ) : (
+                        <p className="text-slate-600 italic py-10 text-center">No statement payload returned yet.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: AFRICA'S TALKING SMS GATEWAY CONTROL */}
+        {activeBoardTab === 'sms_gateway' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Column 1: AT Credentials & Shortcuts */}
+              <div className="space-y-4">
+                <div className="bg-slate-950/20 dark:bg-slate-950/40 p-4 rounded-xl border border-slate-200/50 dark:border-slate-800/50 space-y-3.5 text-xs">
+                  <h4 className="font-bold flex items-center gap-1.5 text-slate-300">
+                    <Radio className="w-4 h-4 text-emerald-500 animate-pulse" />
+                    Africa's Talking Credentials
+                  </h4>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono uppercase font-bold text-slate-400">Username</label>
+                    <input
+                      type="text"
+                      placeholder="sandbox"
+                      value={smsConfigForm.username}
+                      onChange={e => setSmsConfigForm({...smsConfigForm, username: e.target.value})}
+                      className="w-full bg-slate-950 dark:bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 font-mono text-slate-200"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono uppercase font-bold text-slate-400">API Key</label>
+                    <input
+                      type="password"
+                      placeholder="•••••••••••••••••••••"
+                      value={smsConfigForm.apiKey}
+                      onChange={e => setSmsConfigForm({...smsConfigForm, apiKey: e.target.value})}
+                      className="w-full bg-slate-950 dark:bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 font-mono text-slate-200"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono uppercase font-bold text-slate-400">Sender ID / Code (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. WiFiFlow"
+                      value={smsConfigForm.senderId}
+                      onChange={e => setSmsConfigForm({...smsConfigForm, senderId: e.target.value})}
+                      className="w-full bg-slate-950 dark:bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 font-mono text-slate-200"
+                    />
+                  </div>
+                  
+                  <div className="text-[9.5px] text-slate-400 rounded-lg p-2.5 leading-relaxed bg-indigo-950/20 border border-indigo-900/30">
+                    <strong>Note:</strong> Set username to <strong className="text-emerald-400">sandbox</strong> to activate Virtual Dispatcher, allowing complete offline sandbox SMS simulations with delivery timelines.
+                  </div>
+                </div>
+
+                {/* SMS Campaign Shortcuts */}
+                <div className="bg-slate-950/20 dark:bg-slate-950/40 p-4 rounded-xl border border-slate-200/50 dark:border-slate-800/50 space-y-3.5 text-xs">
+                  <h4 className="font-bold flex items-center gap-1.5 text-slate-300">
+                    <Terminal className="w-4 h-4 text-sky-400" />
+                    Quick Dispatch Templates
+                  </h4>
+                  <p className="text-[11px] text-slate-400 pb-1">Click to load pre-formatted Safaricom SMS payloads instantly:</p>
+                  
+                  <div className="space-y-2">
+                    {[
+                      {
+                        title: "🎫 Hotspot Voucher code",
+                        body: "WiFiFlow Payment Confirmed! KES 50 received for 3 Hours Unlimited. Voucher Code: WFLW-X89AB. Enjoy blazing-fast speed!"
+                      },
+                      {
+                        title: "⏳ Broadband Renewal notice",
+                        body: "Dear customer, your 10 Mbps Home Fiber subscription on WiFiFlow expires tomorrow. Renew now via Paybill 174379."
+                      },
+                      {
+                        title: "⚡ Promo Weekend Speedboost",
+                        body: "Weekend Special! Get double Speed on your active voucher for just KES 30. Dial *482# or login to request upgrade."
+                      }
+                    ].map((tmpl, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setSmsForm({ ...smsForm, message: tmpl.body })}
+                        className="w-full text-left p-2.5 border border-slate-850 hover:border-indigo-500/50 rounded-lg bg-slate-950/40 hover:bg-slate-900/50 text-slate-300 transition-all cursor-pointer text-[10.5px] block space-y-1"
+                      >
+                        <span className="font-bold block text-indigo-400 text-xs">{tmpl.title}</span>
+                        <p className="line-clamp-2 text-[10px] text-slate-400">{tmpl.body}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Column 2: SMS Dispatcher Form & Live Smartphone Mockup */}
+              <div className="space-y-4">
+                <form onSubmit={handleSendManualSms} className="bg-slate-950/20 dark:bg-slate-950/40 p-4 rounded-xl border border-slate-200/50 dark:border-slate-800/50 space-y-3.5 text-xs">
+                  <h4 className="font-bold flex items-center gap-1.5 text-slate-300">
+                    <Send className="w-4 h-4 text-indigo-500" />
+                    Direct Messenger Console
+                  </h4>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono uppercase font-bold text-slate-400">Recipient Phone</label>
+                    <input
+                      type="text"
+                      value={smsForm.to}
+                      onChange={e => setSmsForm({...smsForm, to: e.target.value})}
+                      placeholder="e.g. 254712345678"
+                      className="w-full bg-slate-950 dark:bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 font-mono text-slate-200 font-bold text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono uppercase font-bold text-slate-400">Message Body</label>
+                    <textarea
+                      rows={3}
+                      value={smsForm.message}
+                      onChange={e => setSmsForm({...smsForm, message: e.target.value})}
+                      placeholder="Voucher details..."
+                      className="w-full bg-slate-950 dark:bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-slate-200 leading-normal text-xs"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSendingSms || !smsForm.to || !smsForm.message}
+                    className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-55 py-2 rounded font-bold text-white transition-all text-xs cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    {isSendingSms ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    Send SMS Payload
+                  </button>
+
+                  {smsResult && (
+                    <div className="p-2.5 rounded bg-slate-950/40 border border-slate-800 text-[10.5px]">
+                      {smsResult.success ? (
+                        <div className="text-emerald-400 space-y-1">
+                          <p className="font-bold">✓ Dispatch Processed</p>
+                          <p className="text-[9.5px]">ID: {smsResult.result?.messageId} ({smsResult.result?.status})</p>
+                          <p className="text-[9.5px]">Cost: {smsResult.result?.cost || "KES 0.0"}</p>
+                        </div>
+                      ) : (
+                        <div className="text-rose-400 space-y-1">
+                          <p className="font-bold">✗ Delivery Refused</p>
+                          <p className="text-[9.5px]">{smsResult.error || "Connection timed out."}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </form>
+
+                {/* Smartphone Preview Visualizer Mockup */}
+                <div className="border border-slate-800 bg-slate-950 rounded-2xl overflow-hidden p-3.5 shadow-lg space-y-2.5 text-slate-200">
+                  <div className="flex justify-between items-center text-[9px] font-mono text-slate-500 border-b border-slate-900 pb-1.5">
+                    <span>Safaricom 5G</span>
+                    <span className="font-bold">14:22 PM</span>
+                    <span>100% 🔋</span>
+                  </div>
+                  
+                  <div className="text-center text-[10px] text-slate-550 pt-1 font-semibold">
+                    Sender Code: <span className="text-slate-350">{smsConfigForm.senderId || "WiFiFlow"}</span>
+                  </div>
+
+                  <div className="space-y-2 py-1">
+                    <div className="bg-slate-900 border border-slate-850 rounded-2xl p-3 text-[11px] max-w-[90%] left-0 relative space-y-1 shadow-sm leading-relaxed">
+                      <p className="text-slate-300">
+                        {smsForm.message || <span className="italic text-slate-600">Start drafting or select speed templates to preview message markup...</span>}
+                      </p>
+                      <span className="block text-[8px] text-right text-slate-500 font-mono">14:22 PM</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Column 3: Transmission History logs */}
+              <div className="space-y-2">
+                <span className="text-[10px] font-mono uppercase font-bold text-slate-400 block">Africa's Talking Transmit History</span>
+                <div className="max-h-[580px] overflow-y-auto space-y-2 text-[11px] font-mono pr-1">
+                  {smsLogs.length === 0 ? (
+                    <p className="text-slate-600 italic py-10 text-center text-xs">No SMS delivery logged.</p>
+                  ) : (
+                    smsLogs.map(log => {
+                      let statusBadgeColor = 'bg-slate-500/10 text-slate-400';
+                      if(log.status === 'SUCCESS') statusBadgeColor = 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20';
+                      if(log.status === 'SIMULATED') statusBadgeColor = 'bg-sky-500/15 text-sky-400 border border-sky-500/20';
+                      if(log.status === 'FAILED') statusBadgeColor = 'bg-rose-500/15 text-rose-400 border border-rose-500/20';
+
+                      return (
+                        <div key={log.id} className="p-2.5 border dark:border-slate-800 bg-slate-950/20 dark:bg-slate-950/40 rounded-xl space-y-1.5">
+                          <div className="flex justify-between items-center text-[10px]">
+                            <strong className="text-indigo-400">{log.to}</strong>
+                            <span className={`px-1.5 py-0.2 rounded font-bold uppercase tracking-wide ${statusBadgeColor}`}>
+                              {log.status}
+                            </span>
+                          </div>
+                          
+                          <p className="text-slate-300 leading-normal text-[10.5px]">"{log.message}"</p>
+                          
+                          <div className="flex justify-between items-center text-[9px] text-slate-500">
+                            <span>Cost: {log.cost || 'KES 0.00'}</span>
+                            <span>{new Date(log.timestamp).toLocaleTimeString()}</span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

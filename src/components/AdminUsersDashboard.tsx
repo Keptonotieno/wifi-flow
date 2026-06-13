@@ -12,6 +12,7 @@ interface AdminUsersDashboardProps {
   activeSessions?: ActiveSession[];
   onNavigateTab: (tab: string) => void;
   isDark: boolean;
+  onDeleteCustomer?: (id: string) => void;
 }
 
 export default function AdminUsersDashboard({
@@ -19,7 +20,8 @@ export default function AdminUsersDashboard({
   customers,
   activeSessions = [],
   onNavigateTab,
-  isDark
+  isDark,
+  onDeleteCustomer
 }: AdminUsersDashboardProps) {
   // Query states
   const [searchTerm, setSearchTerm] = useState('');
@@ -186,6 +188,15 @@ export default function AdminUsersDashboard({
       return;
     }
 
+    // STRICT OWNER RESTRICTION: No other account can be created as administrative Tenant Owner or Super Admin
+    if (newRole === 'Tenant Owner' || newRole === 'Super Admin') {
+      const norm = newEmail.toLowerCase().trim();
+      if (norm !== 'keptonotieno@gmail.com' && norm !== 'keptonotieno@mail.com') {
+        setAddError('Access Denied: Only keptonotieno@gmail.com is authorized to hold Tenant Owner or Super Admin status.');
+        return;
+      }
+    }
+
     const newUser = {
       fullName: newName,
       email: newEmail.toLowerCase(),
@@ -266,6 +277,7 @@ export default function AdminUsersDashboard({
       const isOnlineRightNow = !!activeSession;
       
       return {
+        id: c.id,
         fullName: c.fullName,
         email: c.email || `${c.fullName.toLowerCase().replace(/\s+/g, '')}@wififlow-mesh.co.ke`,
         phone: c.phoneNumber,
@@ -288,6 +300,7 @@ export default function AdminUsersDashboard({
   const uniformSystemUsers = systemUsers
     .filter(u => u.tenantId === tenant.id)
     .map(u => ({
+      id: u.email,
       fullName: u.fullName,
       email: u.email,
       phone: u.phone || '+254700000000',
@@ -641,13 +654,21 @@ export default function AdminUsersDashboard({
                             <span>Quick Contact</span>
                           </button>
 
-                          {/* Delete option for system operators (no customers) */}
-                          {u.role !== 'Customer' && u.email.toLowerCase() !== 'admin@wififlow.co.ke' && (
+                          {/* Delete option for all accounts (both system operators and customers) */}
+                          {u.email.toLowerCase() !== 'keptonotieno@gmail.com' && u.email.toLowerCase() !== 'keptonotieno@mail.com' && (
                             <button
                               type="button"
-                              onClick={() => handleDeleteSystemUser(u.email)}
-                              className="p-1 text-slate-400 hover:text-red-400 rounded transition-colors cursor-pointer"
-                              title="Delete Operator Profile"
+                              onClick={() => {
+                                if (u.role === 'Customer') {
+                                  if (onDeleteCustomer && u.id) {
+                                    onDeleteCustomer(u.id);
+                                  }
+                                } else {
+                                  handleDeleteSystemUser(u.email);
+                                }
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded transition-all cursor-pointer"
+                              title={`Delete ${u.role === 'Customer' ? 'Customer Profile' : 'Operator Profile'}`}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>

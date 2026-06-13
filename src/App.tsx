@@ -775,6 +775,7 @@ export default function App() {
                 activeSessions={activeSessions}
                 onNavigateTab={setActiveTab}
                 isDark={isDark}
+                onDeleteCustomer={handleDeleteCustomer}
               />
             )}
 
