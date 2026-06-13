@@ -942,8 +942,8 @@ export default function DashboardView({
             <div className="text-[10px] font-mono text-indigo-400 uppercase font-black">7-Day Period Active</div>
           </div>
           
-          <div className="h-64 mt-2">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="h-64 mt-2 min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <AreaChart data={trendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
@@ -981,8 +981,8 @@ export default function DashboardView({
             <p className="text-[10px] text-slate-400">Total processed revenue splits by speed caps</p>
           </div>
 
-          <div className="h-44 flex items-center justify-center my-1 relative">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="h-44 flex items-center justify-center my-1 relative min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <PieChart>
                 <Pie
                   data={pieData}

@@ -258,13 +258,67 @@ export async function pullTable<T>(
   }
 }
 
+export function isValidUUID(str: string): boolean {
+  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+}
+
+export function toDeterministicUUID(str: string): string {
+  if (!str) return str;
+  if (typeof str !== 'string') return str;
+  if (isValidUUID(str)) return str.toLowerCase();
+
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash;
+  }
+  
+  let hashStr = '';
+  let seed = Math.abs(hash) || 123456789;
+  for (let i = 0; i < 32; i++) {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    const digit = (seed % 16).toString(16);
+    hashStr += digit;
+  }
+
+  return [
+    hashStr.substring(0, 8),
+    hashStr.substring(8, 12),
+    '4' + hashStr.substring(13, 16),
+    ((parseInt(hashStr.substring(16, 17), 16) & 0x3) | 0x8).toString(16) + hashStr.substring(17, 20),
+    hashStr.substring(20, 32)
+  ].join('-');
+}
+
+const UUID_FIELDS = new Set([
+  'id',
+  'tenant_id',
+  'customer_id',
+  'package_id',
+  'created_by_reseller_id',
+  'active_package_id'
+]);
+
+export function prepareDbRecord(dbRecord: any): any {
+  if (!dbRecord || typeof dbRecord !== 'object') return dbRecord;
+  const processed = { ...dbRecord };
+  for (const key of Object.keys(processed)) {
+    if (UUID_FIELDS.has(key) && typeof processed[key] === 'string' && processed[key]) {
+      processed[key] = toDeterministicUUID(processed[key]);
+    }
+  }
+  return processed;
+}
+
 export async function upsertRecord<T>(
   tableName: string,
   record: T,
   mapperToDb: (item: T) => any
 ): Promise<boolean> {
   try {
-    const dbRecord = mapperToDb(record);
+    const rawDbRecord = mapperToDb(record);
+    const dbRecord = prepareDbRecord(rawDbRecord);
     let { error } = await supabase.from(tableName).upsert(dbRecord);
     
     // Schema Cache self-healing: Retry if 'expiry_date' column is missing in remote vouchers table
@@ -295,7 +349,8 @@ export async function deleteRecord(
   id: string
 ): Promise<boolean> {
   try {
-    const { error } = await supabase.from(tableName).delete().eq('id', id);
+    const cleanId = toDeterministicUUID(id);
+    const { error } = await supabase.from(tableName).delete().eq('id', cleanId);
     if (error) {
       if (error.message && error.message.includes('Invalid path specified in request URL')) {
         console.warn(`[Supabase Schema Notice]: Table "${tableName}" does not exist in your active Supabase database schema yet. To resolve this, navigate to the "Integration Setup" tab in the App Sidebar, copy the SQL Database Initializer script, and execute it inside your Supabase SQL Editor. Under the hood, we are gracefully utilizing the secure offline sandbox with standard mock data records.`);
