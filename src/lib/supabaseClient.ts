@@ -205,7 +205,7 @@ export function mapVoucherFromDb(row: any): Voucher {
     packageId: row.package_id,
     packageName: row.package_name,
     price: Number(row.price || 0),
-    expiryDateStr: '24 Hours',
+    expiryDateStr: row.expiry_date_str || '24 Hours',
     status: (row.status || 'Active') as any,
     createdByResellerId: row.created_by_reseller_id || null,
     redeemedByCustomerName: row.redeemed_by_customer_name || null,
@@ -223,6 +223,7 @@ export function mapVoucherToDb(v: Voucher): any {
     package_name: v.packageName,
     price: v.price,
     expiry_date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    expiry_date_str: v.expiryDateStr || '24 Hours',
     status: v.status,
     created_by_reseller_id: v.createdByResellerId,
     redeemed_by_customer_name: v.redeemedByCustomerName,
@@ -321,12 +322,38 @@ export async function upsertRecord<T>(
     const dbRecord = prepareDbRecord(rawDbRecord);
     let { error } = await supabase.from(tableName).upsert(dbRecord);
     
-    // Schema Cache self-healing: Retry if 'expiry_date' column is missing in remote vouchers table
-    if (error && error.message && error.message.includes("expiry_date") && tableName === 'vouchers') {
-      console.warn(`[Supabase Schema Compatibility]: 'expiry_date' column not found in database. Retrying vouchers upsert without it...`);
-      const { expiry_date, ...restOfRecord } = dbRecord;
-      const retryResult = await supabase.from(tableName).upsert(restOfRecord);
-      error = retryResult.error;
+    // Schema Cache self-healing: Retry if 'expiry_date' or 'expiry_date_str' columns are missing in remote vouchers table
+    if (error && error.message && tableName === 'vouchers') {
+      let retryRecord = { ...dbRecord };
+      let shouldRetry = false;
+      if (error.message.includes("expiry_date_str")) {
+        delete retryRecord.expiry_date_str;
+        shouldRetry = true;
+      }
+      if (error.message.includes("expiry_date")) {
+        delete retryRecord.expiry_date;
+        shouldRetry = true;
+      }
+      if (shouldRetry) {
+        console.warn(`[Supabase Schema Compatibility]: Retrying vouchers upsert with compatible columns...`);
+        let retryResult = await supabase.from(tableName).upsert(retryRecord);
+        if (retryResult.error && retryResult.error.message) {
+          let retryRecord2 = { ...retryRecord };
+          let shouldRetry2 = false;
+          if (retryResult.error.message.includes("expiry_date_str")) {
+            delete retryRecord2.expiry_date_str;
+            shouldRetry2 = true;
+          }
+          if (retryResult.error.message.includes("expiry_date")) {
+            delete retryRecord2.expiry_date;
+            shouldRetry2 = true;
+          }
+          if (shouldRetry2) {
+            retryResult = await supabase.from(tableName).upsert(retryRecord2);
+          }
+        }
+        error = retryResult.error;
+      }
     }
 
     if (error) {
